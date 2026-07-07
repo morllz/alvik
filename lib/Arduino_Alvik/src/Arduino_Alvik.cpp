@@ -25,6 +25,7 @@ Arduino_Alvik::Arduino_Alvik():i2c(Wire){
   orientation_semaphore = xSemaphoreCreateMutex();
   imu_semaphore = xSemaphoreCreateMutex();
   distance_semaphore = xSemaphoreCreateMutex();
+  distance_map_semaphore = xSemaphoreCreateMutex();
   touch_semaphore = xSemaphoreCreateMutex();
   joint_vel_semaphore = xSemaphoreCreateMutex();
   joint_pos_semaphore = xSemaphoreCreateMutex();
@@ -133,6 +134,9 @@ int Arduino_Alvik::begin(const bool verbose, const uint8_t core){
   distances[5] = 0.0;
   distances[6] = 0.0;
 
+  memset(distance_map, 0, sizeof(distance_map));
+  memset(distance_map_sigma, 0, sizeof(distance_map_sigma));
+
   touch = 0;
   touch_bits = 0;
 
@@ -153,8 +157,6 @@ int Arduino_Alvik::begin(const bool verbose, const uint8_t core){
   battery_soc = 0.0;
   battery_is_charging = false;
 
-
-
   uart->begin(UART_BAUD_RATE);
 
 
@@ -168,7 +170,6 @@ int Arduino_Alvik::begin(const bool verbose, const uint8_t core){
     idle();
   }
 
-  //begin_update_thread();
   xTaskCreatePinnedToCore(this->update_thread, "update", 10000, this, 1, &update_task, core);
 
   delay(100);
@@ -380,7 +381,19 @@ int Arduino_Alvik::parse_message(){                                             
       battery_is_charging = (battery > 0) ? true : false;
       battery = abs(battery);
       break;
-
+    
+    case '#':
+      while (!xSemaphoreTake(distance_map_semaphore, 5)){}
+      packeter->unpacketC64U(code, distance_map);
+      xSemaphoreGive(distance_map_semaphore);
+      distance_request_finished = true;
+      break;
+    case '*':
+      while (!xSemaphoreTake(distance_map_semaphore, 5)){}
+      packeter->unpacketC64I(code, distance_map_sigma);
+      xSemaphoreGive(distance_map_semaphore);
+      distance_request_finished = true;
+      break;
     // nothing is parsed, the command is newer to this library
     default:
       return -1;
@@ -897,6 +910,50 @@ float Arduino_Alvik::get_distance_top(const uint8_t unit){
 
 float Arduino_Alvik::get_distance_bottom(const uint8_t unit){
   return convert_distance(distances[6], MM, unit);
+}
+
+void Arduino_Alvik::request_distance_map(const uint8_t readings_count, const uint16_t timeout){
+  Serial.println("Requesting distance map");
+  auto start_time = millis();
+  distance_request_finished = false;
+  while (!xSemaphoreTakeRecursive(buffer_semaphore, TICK_TIME_SEMAPHORE));
+  msg_size = packeter->packetC1B('#', readings_count);
+  uart->write(packeter->msg, msg_size);
+  xSemaphoreGiveRecursive(buffer_semaphore);
+  while(!distance_request_finished && (millis() - start_time < timeout)){
+    delay(10);
+  }
+  if (!distance_request_finished){
+    Serial.println("Distance map request timed out");
+  }else{
+    Serial.println("Distance map request finished");
+  }
+}
+
+void Arduino_Alvik::request_distance_sigma(const uint16_t timeout){
+  Serial.println("Requesting distance sigma");
+  auto start_time = millis();
+  distance_request_finished = false;
+  while (!xSemaphoreTakeRecursive(buffer_semaphore, TICK_TIME_SEMAPHORE));
+  msg_size = packeter->packetC1B('*', 0);
+  uart->write(packeter->msg, msg_size);
+  xSemaphoreGiveRecursive(buffer_semaphore);
+  while(!distance_request_finished && (millis() - start_time < timeout)){
+    delay(10);
+  }
+  if (!distance_request_finished){
+    Serial.println("Distance sigma request timed out");
+  }else{
+    Serial.println("Distance sigma request finished");
+  }
+}
+
+uint8_t* Arduino_Alvik::get_distance_map() {
+  return distance_map;
+}
+
+uint16_t* Arduino_Alvik::get_distance_sigma() {
+  return (uint16_t*)distance_map_sigma;
 }
 
 

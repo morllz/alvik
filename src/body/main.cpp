@@ -16,10 +16,11 @@
 #include "sensor_line.h"
 #include "sensor_tof_matrix.h"
 #include "ucPack.h"
+#include "math.h"
 
 Arduino_AlvikCarrier alvik;
 SensorLine line(EXT_A2,EXT_A1,EXT_A0);
-SensorTofMatrix tof(alvik.wire, EXT_GPIO3, EXT_GPIO2);
+SensorTofMatrix tof(alvik.wire, EXT_GPIO3, EXT_GPIO2, 8);
 
 
 ucPack packeter(200);
@@ -199,6 +200,51 @@ void loop(){
         case 'Z':
           packeter.unpacketC3F(code, x, y, theta);
           alvik.resetPose(x, y, theta);
+          break;
+        case '#':
+        {
+          uint8_t reading_count = 0;
+          packeter.unpacketC1B(code, reading_count);
+
+          uint8_t readings[reading_count][64];
+          uint8_t sigmas[reading_count][64];
+          for(int i = 0; i < reading_count; i++){
+            tof.update();
+            for(int j = 0; j < 64; j++){
+              // clamp distance_mm and range_sigma_mm to [0,2500] then scale to 0..250
+              uint16_t d = tof.results.distance_mm[j];
+              d = std::min<uint16_t>(d, static_cast<uint16_t>(2500));
+              readings[i][j] = static_cast<uint8_t>(d / 10);
+
+              uint16_t s = tof.results.range_sigma_mm[j];
+              s = std::min<uint16_t>(s, static_cast<uint16_t>(2500));
+              sigmas[i][j] = static_cast<uint8_t>(s / 10);
+            }
+            delay(100);
+          }
+
+          for(int i = 0; i < 64; i++){
+            uint8_t sigma;
+            float num = 0;
+            float denom = 0;
+            for(int j = 0; j < reading_count; j++){
+              sigma = sigmas[j][i];
+              num += readings[j][i] / ((float)sigma*sigma+ 1e-6);
+              denom += 1.0 / ((float)sigma*sigma+ 1e-6);
+            }
+
+            readings[0][i] = num / denom;
+          }
+
+          msg_size = packeter.packetC64U('#', readings[0]);
+          alvik.serial->write(packeter.msg,msg_size);
+        }
+          break;
+        case '*':
+          if(tof.update()){
+            msg_size = packeter.packetC64I('*', (int16_t*)(tof.results.range_sigma_mm));
+            alvik.serial->write(packeter.msg,msg_size);
+          }
           break;
       }
     }

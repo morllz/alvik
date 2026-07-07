@@ -2,9 +2,6 @@
 
 unsigned long baud = 115200;
 
-int rts = -1;
-int dtr = -1;
-
 
 static void onLineChange(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
   if (event_base == ARDUINO_USB_CDC_EVENTS) {
@@ -24,6 +21,8 @@ static void onLineChange(void* arg, esp_event_base_t event_base, int32_t event_i
 void setup() {
   Serial.onEvent(onLineChange);
   Serial.enableReboot(false);
+  Serial.begin(baud);
+  Serial.setRxBufferSize(0);
   Serial.setRxBufferSize(2048);
   Serial0.setRxBufferSize(8192);
   Serial0.setTxBufferSize(8192);
@@ -31,28 +30,28 @@ void setup() {
   Serial0.flush();
   pinMode(BOOT_STM32, OUTPUT);
   pinMode(RESET_STM32, OUTPUT);
-  digitalWrite(BOOT_STM32, HIGH);
-  delay(10);
-  digitalWrite(RESET_STM32, LOW);
-  delay(20);
-  digitalWrite(RESET_STM32, HIGH);
-  delay(200);
+  digitalWrite(BOOT_STM32,HIGH);
+  delay(1000);
+  digitalWrite(RESET_STM32,LOW);
+  delay(1000);
+  digitalWrite(RESET_STM32,HIGH);
 }
 
 void loop() {
-  uint8_t buf[512];
-
-  int n = Serial.available();
-  if (n > 0) {
-    n = Serial.readBytes(buf, min(n, (int)sizeof(buf)));
-    Serial0.write(buf, n);
+  int len = 0;
+  uint8_t auc_buffer[488];
+  while (Serial.available() && len < sizeof(auc_buffer)) {
+    auc_buffer[len++] = Serial.read();
+  }
+  if (len) {
+    Serial0.write(auc_buffer, len);
   }
 
-  n = Serial0.available();
-  if (n > 0) {
-    n = Serial0.readBytes(buf, min(n, (int)sizeof(buf)));
-    Serial.write(buf, n);
+  len = 0;
+  while (Serial0.available() && len < sizeof(auc_buffer)) {
+    auc_buffer[len++] = Serial0.read();
   }
-
-  delay(1);
+  if (len) {
+    Serial.write(auc_buffer, len);
+  }
 }

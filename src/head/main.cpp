@@ -1,43 +1,143 @@
 #include <Arduino_Alvik.h>
+#include <array>
+#include <cmath>
+#include <WiFi.h>
+#include <ArduinoWebsockets.h>
+
+using namespace websockets;
+
+const char* ssid = "roomba";
+const char* password = "12345678";
+
+WebsocketsServer wsServer;
+WebsocketsClient client;
+
+unsigned long lastSend = 0;
+int counter = 0;
 
 Arduino_Alvik alvik;
 
-float reference = 150.0;
-float error = 0.0;
-float distance[5];
+uint8_t* distance_map = nullptr;
 
-float sign(float x) {
-  return (x > 0) - (x < 0);
-}
+float points[64][3];
+float pos[2];
+float rot;
 
-void setup(){
+int last_reconnect = millis();
+
+void setup() {
   alvik.begin();
+
   Serial.begin(115200);
+
+  delay(1000);
+
+  WiFi.softAPConfig(IPAddress(10,0,0,1), IPAddress(10,0,0,1), IPAddress(255, 255, 255, 0));
+  WiFi.softAP(ssid, password);
+
+  wsServer.listen(8080);
+  Serial.println("WebSocket server started on port 8080");
+
+  delay(5000);
 }
 
-void loop(){
+void convert_tof_reading_to_obj_space() {
+  for(int i = 0; i < 64; ++i) {
+    float yaw = (30 - (60/8 * (i%8))) * (M_PI / 180.0);
+    float pitch = (30 - (60/8 * (i/8))) * (M_PI / 180.0);
 
-  alvik.get_distance(distance[0], distance[1], distance[2], distance[3], distance[4], MM);
+    float reading = distance_map[i] * 10.0; // convert to mm
+    points[i][0] = reading;
+    points[i][1] = reading * std::tan(yaw);
+    points[i][2] = reading * std::tan(pitch);
+  }
+}
 
-  float min = distance[0];
-  int i = 0;
-  for(int j = 1; j < 5; j++) {
-    if(distance[j] < min) {
-      min = distance[j];
-      i = j;
+void convcert_obj_space_to_world_space() {
+  float cos_rot = std::cos(rot * (M_PI / 180.0));
+  float sin_rot = std::sin(rot * (M_PI / 180.0));
+
+  for(int i = 0; i < 64; ++i) {
+    float x_obj = points[i][0];
+    float y_obj = points[i][1];
+
+    float worldX = x_obj * cos_rot - y_obj * sin_rot + pos[0] * 10;
+    float worldY = x_obj * sin_rot + y_obj * cos_rot + pos[1] * 10;
+
+    points[i][0] = ((int)(worldX * 100.0))/100.0;
+    points[i][1] = ((int)(worldY * 100.0))/100.0;
+  }
+}
+
+int last_measure = 0;
+
+
+const float FORWARD_SPEED = 12.0;   // cm/s
+const float TURN_ANGLE    = 25.0;   // degrees
+const int   SAFE_DISTANCE = 25;     // cm
+
+float left, centerLeft, center, right, centerRight;
+
+int scanDirection = 1;
+
+void loop() {
+
+  if(millis() - last_measure > 15000 || millis() < 15000) {
+    Serial.println("Start scanning");
+    delay(100);
+    alvik.brake();
+    if (!client.available()) {
+      client = wsServer.accept();
+      client.setFragmentsPolicy(FragmentsPolicy_Aggregate);
+      if (client.available()) {
+        Serial.println("Client connected");
+      }
     }
+
+    for(int i = 0; i < 36; ++i) {
+        alvik.rotate(12 * scanDirection);
+        alvik.request_distance_map(5, 5000);
+        distance_map = alvik.get_distance_map();
+        convert_tof_reading_to_obj_space();
+        convcert_obj_space_to_world_space();
+        alvik.get_pose(pos[0], pos[1], rot);
+
+        if (client.available()) {
+          Serial.println("Sending");
+            client.sendBinary((char*)points, sizeof(points));
+        }
+        delay(100);
+      }
+    last_measure = millis();
+
+    scanDirection *= -1;
   }
 
-  error = min - reference;
+  // Read the five distance zones
+  alvik.get_distance(left, centerLeft, center, centerRight, right);
 
-  if(i == 0) {
-    alvik.set_wheels_speed((1-0.3*sign(error)) * error, (1+0.3*sign(error)) * error);
-    return;
+  if (center < SAFE_DISTANCE ||
+      centerLeft < SAFE_DISTANCE ||
+      centerRight < SAFE_DISTANCE) {
+
+    alvik.brake();
+    delay(100);
+
+    // Turn toward the side with more free space
+    if ((left + centerLeft) > (right + centerRight)) {
+      alvik.rotate(TURN_ANGLE);   // turn left
+    } else {
+      alvik.rotate(-TURN_ANGLE);    // turn right
+    }
+
+    delay(100);
   }
-  if(i == 4) {
-    alvik.set_wheels_speed((1+0.3*sign(error)) * error, (1-0.3*sign(error)) * error);
-    return;
+  else {
+    // Path is clear
+    alvik.drive(FORWARD_SPEED, 0.0);
   }
 
-  alvik.set_wheels_speed(error, error);
+  delay(50);
+
 }
+

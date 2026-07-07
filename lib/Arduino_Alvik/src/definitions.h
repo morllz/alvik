@@ -59,7 +59,7 @@ const float MOTOR_CONTROL_DEG_S = 100.0;
 
 #define CM 0
 #define MM 1
-#define M 2
+#define METER 2
 #define IN 3
 #define INCH 3
 const float DISTANCE_UNITS[4] = {1.0, 0.1, 100.0, 2.54};

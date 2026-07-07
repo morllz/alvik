@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D WebSocket Point Viewer</title>
+
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #111;
+    }
+
+    canvas {
+        display: block;
+    }
+
+    #status {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+        background: rgba(0,0,0,0.5);
+        padding: 8px;
+    }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/"
+  }
+}
+</script>
+</head>
+
+<body>
+
+<div id="status">Connecting...</div>
+
+<script type="module">
+
+import * as THREE from "three";
+
+import { OrbitControls } from 
+"three/addons/controls/OrbitControls.js";
+
+
+// --------------------
+// Scene setup
+// --------------------
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x111111);
+
+
+// Camera
+
+const camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.01,
+    1000
+);
+
+camera.position.set(0, 0, 10);
+
+
+// Renderer
+
+const renderer = new THREE.WebGLRenderer({
+    antialias: true
+});
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+document.body.appendChild(renderer.domElement);
+
+
+// Controls
+
+const controls = new OrbitControls(
+    camera,
+    renderer.domElement
+);
+
+controls.enableDamping = true;
+
+
+// --------------------
+// Point cloud storage
+// --------------------
+
+const geometry = new THREE.BufferGeometry();
+
+const material = new THREE.PointsMaterial({
+    color: 0x00ff88,
+    size: 0.08
+});
+
+const pointCloud = new THREE.Points(
+    geometry,
+    material
+);
+
+scene.add(pointCloud);
+
+
+// Store every received point here
+const allPoints = [];
+
+
+// Add coordinate axes
+
+const axes = new THREE.AxesHelper(5);
+scene.add(axes);
+
+
+// --------------------
+// WebSocket
+// --------------------
+
+const status = document.getElementById("status");
+
+
+const socket = new WebSocket(
+    "ws://10.0.0.1:8080"
+);
+
+
+socket.onopen = () => {
+    status.textContent = "Connected";
+};
+
+
+socket.onerror = () => {
+    status.textContent = "WebSocket error";
+};
+
+
+socket.onclose = () => {
+    status.textContent = "Disconnected";
+};
+
+
+socket.binaryType = "arraybuffer";
+
+socket.onmessage = (event) => {
+
+    const points = new Float32Array(event.data);
+
+    for (let i = 0; i < points.length; i += 3) {
+
+        // discard 0,0,0 points
+        if ((points[i] === 0 && points[i + 1] === 0 && points[i + 2] === 0) || points[i] > 230 || points[i+1] > 230 || points[i+2] > 230) {
+            continue;
+        }
+
+        const fac = 10;
+
+        // append permanently
+        allPoints.push(
+            -points[i] / fac,
+            points[i + 2] / fac,
+            points[i + 1] / fac
+        );
+    }
+
+
+    geometry.setAttribute(
+        "position",
+        new THREE.Float32BufferAttribute(
+            allPoints,
+            3
+        )
+    );
+
+    geometry.computeBoundingSphere();
+
+
+    status.textContent =
+        `Points: ${allPoints.length / 3}`;
+};
+
+
+// --------------------
+// Animation loop
+// --------------------
+
+function animate() {
+
+    requestAnimationFrame(animate);
+
+    controls.update();
+
+    renderer.render(
+        scene,
+        camera
+    );
+}
+
+animate();
+
+
+// --------------------
+// Resize handling
+// --------------------
+
+window.addEventListener(
+    "resize",
+    () => {
+
+        camera.aspect =
+            window.innerWidth /
+            window.innerHeight;
+
+        camera.updateProjectionMatrix();
+
+        renderer.setSize(
+            window.innerWidth,
+            window.innerHeight
+        );
+
+    }
+);
+
+</script>
+
+</body>
+</html>

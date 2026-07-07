@@ -71,6 +71,11 @@ class Arduino_Alvik{
     SemaphoreHandle_t distance_semaphore;
     int16_t distances[7];
 
+    SemaphoreHandle_t distance_map_semaphore;
+    bool distance_request_finished = true;
+    uint8_t distance_map[64];
+    int16_t distance_map_sigma[64];
+
     SemaphoreHandle_t touch_semaphore;
     uint8_t touch, touch_bits;
 
@@ -249,6 +254,10 @@ class Arduino_Alvik{
     void get_distance(float & left, float & center_left, float & center, float & center_right, float & right, const uint8_t unit = CM);
     float get_distance_top(const uint8_t unit = CM);
     float get_distance_bottom(const uint8_t unit = CM);
+    void request_distance_map(const uint8_t readings_count = 1, const uint16_t timeout = 10000);
+    void request_distance_sigma(const uint16_t timeout = 10000);
+    uint8_t* get_distance_map();
+    uint16_t* get_distance_sigma();
 
 
     bool get_touch_any();

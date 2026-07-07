@@ -26,7 +26,6 @@ class SensorTofMatrix{
     private:
         VL53L7CX * _sensor;
         TwoWire * _wire;
-        VL53L7CX_ResultsData results;
         int _size;
         int _ranging_freq;
         bool _wire_boost;
@@ -41,7 +40,7 @@ class SensorTofMatrix{
         int center;
         
     public:
-
+        VL53L7CX_ResultsData results;
 
         SensorTofMatrix(TwoWire * wire, const uint8_t lpn_pin, const uint8_t i2c_rst_pin, const int size=4, const int ranging_freq=-1, const bool wire_boost = true, const uint32_t wire_base_clock=WIRE_BASE_CLOCK){
             _wire=wire;

@@ -106,7 +106,7 @@ void odom_timer_callback(rcl_timer_t * timer, int64_t last_call_time)
     odom_msg.header.frame_id = micro_ros_string_utilities_init("odom");
 
     float x = 0.f, y = 0.f, theta = 0.f;
-    alvik.get_pose(x, y, theta, M, RAD);
+    alvik.get_pose(x, y, theta, METER, RAD);
 
     odom_msg.pose.pose.position.x  = x;
     odom_msg.pose.pose.position.y  = y;
